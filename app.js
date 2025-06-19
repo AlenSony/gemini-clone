@@ -12,6 +12,8 @@ let isStopped = false;
 let isGenerating = false;
 let abortController = null;
 const chatHistory = [];
+let typingInterval = null;
+let currentResponse = null;  // Add this to track current response
 
 const API_KEY = "AIzaSyAX2GDjNsefrcGvHUSncGZozX-rBvAGVBU";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
@@ -29,17 +31,46 @@ const scrollToBottom = () => container.scrollTo({ top: container.scrollHeight, b
 
 // Typing effect for bot response
 const typingEffect = (text, textElement, botMsgDiv) => {
+    // Don't start if already stopped
+    if (isStopped) {
+        textElement.textContent = "⛔ Response was stopped.";
+        isGenerating = false;
+        toggleButtons(false);
+        return;
+    }
+
+    isGenerating = true;
+    toggleButtons(true);
     textElement.textContent = "";
     const words = text.split(" ");
     let wordIndex = 0;
 
-    const typingInterval = setInterval(() => {
+    // Clear any existing interval
+    if (typingInterval) {
+        clearInterval(typingInterval);
+        typingInterval = null;
+    }
+
+    typingInterval = setInterval(() => {
+        // Check if stopped
+        if (isStopped) {
+            clearInterval(typingInterval);
+            typingInterval = null;
+            textElement.textContent = "⛔ Response was stopped.";
+            isGenerating = false;
+            toggleButtons(false);
+            return;
+        }
+
         if (wordIndex < words.length) {
             textElement.textContent += (wordIndex === 0 ? "" : " ") + words[wordIndex++];
             botMsgDiv.classList.remove("loading");
             scrollToBottom();
         } else {
             clearInterval(typingInterval);
+            typingInterval = null;
+            isGenerating = false;
+            toggleButtons(false);
         }
     }, 40);
 };
@@ -95,14 +126,30 @@ const toggleButtons = (isGenerating) => {
 
 // Stop button handler
 stopBtn.addEventListener("click", () => {
+    stopCurrentResponse();
+});
+
+// Function to stop current response
+const stopCurrentResponse = () => {
     isStopped = true;
+    isGenerating = false;
+    currentResponse = null;
+    
+    // Clear typing interval
+    if (typingInterval) {
+        clearInterval(typingInterval);
+        typingInterval = null;
+    }
+    
+    // Abort API request
     if (abortController) {
         abortController.abort();
         abortController = null;
     }
+    
     toggleButtons(false);
     
-    // Add a message indicating the response was stopped
+    // Update message to indicate stopping
     const lastBotMessage = chatsContainer.querySelector('.bot-message:last-child');
     if (lastBotMessage) {
         const textElement = lastBotMessage.querySelector('.message-text');
@@ -110,11 +157,18 @@ stopBtn.addEventListener("click", () => {
             textElement.textContent = "⛔ Response was stopped.";
         }
     }
-});
+};
 
 // Generate response from API
 const generateResponse = async (botMsgDiv) => {
     const textElement = botMsgDiv.querySelector(".message-text");
+    
+    // Don't start if already stopped
+    if (isStopped) {
+        textElement.textContent = "⛔ Response was stopped.";
+        return;
+    }
+    
     isGenerating = true;
     toggleButtons(true);
 
@@ -134,14 +188,27 @@ const generateResponse = async (botMsgDiv) => {
         });
 
         const data = await response.json();
+        
+        // Check if stopped after API response
+        if (isStopped) {
+            textElement.textContent = "⛔ Response was stopped.";
+            return;
+        }
 
         if (!response.ok) throw new Error(data.error.message);
 
         const responseText = data.candidates[0].content.parts[0].text
             .replace(/\*\*([^*]+)\*\*/g, "$1")
             .trim();
-
-        typingEffect(responseText, textElement, botMsgDiv);
+            
+        currentResponse = responseText;
+        
+        // Final check before starting typing effect
+        if (!isStopped) {
+            typingEffect(responseText, textElement, botMsgDiv);
+        } else {
+            textElement.textContent = "⛔ Response was stopped.";
+        }
 
     } catch (error) {
         if (error.name === "AbortError") {
@@ -151,17 +218,24 @@ const generateResponse = async (botMsgDiv) => {
             console.error("API Error:", error);
         }
     } finally {
-        isGenerating = false;
-        abortController = null;
-        toggleButtons(false);
+        if (isStopped || error) {
+            isGenerating = false;
+            abortController = null;
+            currentResponse = null;
+            toggleButtons(false);
+        }
     }
 };
 
-// Handle prompt form submit
+// Handle form submit
 const handleFormSubmit = (e) => {
     e.preventDefault();
     userMessage = promptInput.value.trim();
     if (!userMessage) return;
+
+    // Reset stop state for new submission
+    isStopped = false;
+    currentResponse = null;
 
     suggestions.forEach(suggestion => suggestion.style.display = "none");
     promptInput.value = "";
@@ -171,11 +245,6 @@ const handleFormSubmit = (e) => {
     userMsgDiv.querySelector(".message-text").textContent = userMessage;
     chatsContainer.appendChild(userMsgDiv);
     scrollToBottom();
-
-    if (isStopped) {
-        isStopped = false;
-        return;
-    }
 
     setTimeout(() => {
         const botMsgHTML = `
