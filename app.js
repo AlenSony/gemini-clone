@@ -15,7 +15,7 @@ const chatHistory = [];
 let typingInterval = null;
 let currentResponse = null;  // Add this to track current response
 
-const API_KEY = "AIzaSyAX2GDjNsefrcGvHUSncGZozX-rBvAGVBU";
+const API_KEY = "Nokki irunno";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
 
 // Element creation utility
